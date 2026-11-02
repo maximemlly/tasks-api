@@ -1,9 +1,0 @@
-name: hello
-
-on: push
-
-jobs:
-  hello:
-    runs-on: ubuntu-latest
-    steps:
-      - run: echo "Branch ${{ github.ref_name }} edited by ${{ github.actor }}"
