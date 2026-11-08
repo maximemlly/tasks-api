@@ -11,9 +11,9 @@ et Argo CD applique le changement. À la fin, un simple `git tag` déploie une n
 
 ## Avant de commencer
 
-- [ ] Docker Desktop lancé, avec **au moins 4 Go de mémoire** (Settings → Resources)
-- [ ] Votre image `ghcr.io/<compte>/tasks-api:0.1.0` existe et son package est **public**
-- [ ] `kubectl version --client` et `kind version` répondent
+- [x] Docker Desktop lancé, avec **au moins 4 Go de mémoire** (Settings → Resources)
+- [x] Votre image `ghcr.io/<compte>/tasks-api:0.1.0` existe et son package est **public**
+- [x] `kubectl version --client` et `kind version` répondent
 
 ### Les commandes qui changent selon votre système
 
@@ -42,6 +42,11 @@ puis allez sur https://localhost:8080 (acceptez l'avertissement du certificat). 
 
 **Questions :** C'est quoi un pod ? Un deployment ? Pourquoi un `namespace` ?
 
+> **Réponses :**
+> - **Un Pod** est la plus petite unité déployable dans Kubernetes : il encapsule un ou plusieurs conteneurs (ici notre conteneur `tasks-api`) qui partagent la même adresse IP et le même espace réseau/stockage.
+> - **Un Deployment** est un contrôleur Kubernetes qui gère le cycle de vie des pods : il s'assure que le nombre souhaité d'instances (`replicas`) tourne en permanence, recrée automatiquement un pod s'il plante, et gère les mises à jour sans coupure (*rolling updates*).
+> - **Un `namespace`** permet de découper et d'isoler logiquement les ressources au sein d'un même cluster (par exemple isoler les composants système d'Argo CD dans le namespace `argocd` et ceux de notre application métier dans le namespace `tasks`).
+
 ---
 
 ## Partie 2 : Le dépôt de configuration (30 min)
@@ -65,6 +70,11 @@ kubectl get pods -n tasks -w     # Ctrl + C pour quitter
 
 **Question :** Pourquoi sépare-t-on le dépôt de l'application et le dépôt de configuration ?
 
+> **Réponse :**
+> - **Découplage CI / CD :** modifier la configuration Kubernetes (par exemple changer le nombre de `replicas`) ne relance pas inutilement les tests Python et la construction de l'image Docker du dépôt applicatif.
+> - **Sécurité et séparation des accès :** les développeurs peuvent travailler sur `tasks-api` tandis que seuls le pipeline de release et l'équipe Ops/Infra (ou Argo CD en lecture) accèdent à `tasks-config`.
+> - **Historique d'audit propre :** l'historique Git de `tasks-config` ne contient que les changements d'état du cluster (versions déployées, réplicas), ce qui rend la lecture et les retours arrière (`git revert`) immédiats.
+
 ---
 
 ## Partie 3 : Le GitOps en action (25 min)
@@ -82,6 +92,10 @@ Observez : Argo CD détecte l'écart et **remet 3** (c'est `selfHeal`).
 > 📸 **TP4-7 :** l'historique des commits de `tasks-config` avec le `revert`, et le retour à 2 pods.
 
 **Questions :** Que signifie `selfHeal` ? Pourquoi le retour arrière est-il simple en GitOps ?
+
+> **Réponses :**
+> - **`selfHeal` (auto-réparation) :** lorsque `selfHeal: true` est activé, Argo CD compare en continu l'état réel du cluster Kubernetes avec l'état souhaité dans Git. Si quelqu'un modifie le cluster à la main (ex. `kubectl scale --replicas=5`), Argo CD détecte immédiatement cette dérive (*drift*) et réapplique l'état défini dans Git (`replicas: 3`).
+> - **Simplicité du retour arrière (*rollback*) :** en GitOps, le dépôt Git est l'unique source de vérité (*Single Source of Truth*). Pour annuler un déploiement ou un changement de configuration, on n'a pas besoin de chercher quelles commandes `kubectl` lancer : un simple `git revert HEAD` suivi d'un `git push` dans `tasks-config` suffit pour qu'Argo CD rétablisse l'état précédent.
 
 ---
 
@@ -106,6 +120,19 @@ Objectif : un tag `v0.2.0` sur le dépôt applicatif doit aboutir à la nouvelle
 > 📸 **TP4-10 :** `/version` qui répond `0.2.0`.
 
 **Questions :** Résumez en 5 lignes le chemin d'un `git tag` jusqu'au pod. Qui pousse (push) et qui tire (pull) ? Quelle différence avec un déploiement CI/CD « classique » ?
+
+> **Réponses :**
+> - **Chemin d'un `git tag` jusqu'au pod (en 5 lignes) :**
+>   1. Le développeur pousse le tag `v0.2.0` sur le dépôt applicatif `tasks-api`, ce qui déclenche le workflow `docker.yml`.
+>   2. Les jobs `test` et `build` valident le code puis construisent et publient l'image `ghcr.io/maximemlly/tasks-api:0.2.0` sur GHCR.
+>   3. Après le test de fumée sur `deploy-staging` et l'approbation manuelle sur `deploy-production`, le job `update-config` s'exécute.
+>   4. `update-config` clone `tasks-config`, met à jour le tag `0.2.0` dans `k8s/deployment.yaml` via `set-image-tag.sh`, puis commite et pousse sur `main`.
+>   5. Argo CD détecte le nouveau commit sur `tasks-config`, synchronise le `Deployment` dans le cluster Kubernetes, et Kubernetes remplace les pods avec l'image `0.2.0`.
+> - **Qui pousse (push) et qui tire (pull) ?**
+>   - **Push :** le développeur pousse le tag Git ; le pipeline GitHub Actions pousse l'image Docker vers GHCR et pousse le commit de mise à jour vers `tasks-config`.
+>   - **Pull :** Argo CD (à l'intérieur du cluster) tire (*pull*) les manifestes depuis `tasks-config`, et le nœud Kubernetes tire (*pull*) l'image Docker depuis GHCR.
+> - **Différence avec un déploiement CI/CD « classique » :**
+>   - Dans un pipeline CI/CD « classique » (*push-based*), c'est le runner GitHub Actions qui exécute `kubectl apply` vers le cluster : il faut donc ouvrir l'API du cluster sur Internet et stocker des identifiants administrateur Kubernetes dans les secrets GitHub. En GitOps (*pull-based*), le cluster ne donne aucun accès entrant à la CI : c'est Argo CD, installé dans le cluster, qui vient lire Git et appliquer les changements.
 
 ---
 

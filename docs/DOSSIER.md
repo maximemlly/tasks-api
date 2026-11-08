@@ -1,5 +1,12 @@
 # Dossier de rendu : GitOps & CI/CD
 
+- **Nom et Prénom :** MAILLARY Maxime
+- **Date :** Novembre 2026
+- **Dépôt GitHub applicatif (`tasks-api`) :** https://github.com/maximemlly/tasks-api
+- **Dépôt GitHub de configuration (`tasks-config`) :** https://github.com/maximemlly/tasks-config
+
+---
+
 ## L'évaluation en bref
 
 | Élément                                                             | Poids                                                            |
@@ -145,18 +152,18 @@ Questions à traiter :
 
 **Objectif :** Mettre en œuvre le déploiement continu selon l'approche GitOps avec Kubernetes (`kind`) et Argo CD. Séparer le dépôt applicatif (`tasks-api`) et le dépôt d'infrastructure/configuration (`tasks-config`), observer la synchronisation automatique et l'auto-réparation (`selfHeal`) d'Argo CD, et automatiser toute la chaîne de bout en bout pour qu'un simple tag Git `v0.2.0` déploie la nouvelle version dans le cluster.
 
-| N°     | Capture à fournir                                                                                  |
-| ------ | -------------------------------------------------------------------------------------------------- |
-| TP4-1  | `kubectl get nodes` (un nœud `Ready`).                                                             |
-| TP4-2  | `kubectl get pods -n argocd` (tous `Running`) et la page de connexion d'Argo CD.                   |
-| TP4-3  | l'application dans Argo CD, état Synced et Healthy, avec ses 2 pods.                               |
-| TP4-4  | la réponse de `/version` obtenue dans le cluster.                                                  |
-| TP4-5  | le commit sur `replicas: 3` et les 3 pods dans Argo CD.                                            |
-| TP4-6  | les pods juste après le `kubectl scale` à 5, puis après la correction automatique (deux captures). |
-| TP4-7  | l'historique des commits de `tasks-config` avec le `revert`, et le retour à 2 pods.                |
-| TP4-8  | le run complet avec tous les jobs au vert, `update-config` compris.                                |
-| TP4-9  | le commit automatique dans `tasks-config` et Argo CD synchronisé sur `0.2.0`.                      |
-| TP4-10 | `/version` qui répond `0.2.0`.                                                                     |
+| N°     | Capture à fournir                                                                                  | Légende explicative                                                                                                                               |
+| ------ | -------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| TP4-1  | `kubectl get nodes` (un nœud `Ready`).                                                             | Vérification de l'état du cluster local `kind` (`gitops-control-plane`) qui apparaît bien au statut `Ready`.                                      |
+| TP4-2  | `kubectl get pods -n argocd` (tous `Running`) et la page de connexion d'Argo CD.                   | Les 7 pods du namespace `argocd` sont tous `1/1 Running` et l'interface web d'Argo CD est accessible via `port-forward` sur `localhost:8080`.     |
+| TP4-3  | l'application dans Argo CD, état Synced et Healthy, avec ses 2 pods.                               | L'application `tasks-api` déployée par Argo CD depuis le dépôt `tasks-config` avec un état `Synced` et `Healthy` et ses 2 pods actifs.            |
+| TP4-4  | la réponse de `/version` obtenue dans le cluster.                                                  | Appel `curl http://localhost:8081/version` à travers le `port-forward` du service Kubernetes renvoyant la version initiale `0.1.0`.               |
+| TP4-5  | le commit sur `replicas: 3` et les 3 pods dans Argo CD.                                            | Passage de `replicas: 2` à `3` par commit Git dans `tasks-config` et apparition automatique du 3ᵉ pod dans Argo CD après synchronisation.         |
+| TP4-6  | les pods juste après le `kubectl scale` à 5, puis après la correction automatique (deux captures). | Démonstration du `selfHeal` : passage manuel à 5 pods via `kubectl scale`, puis correction automatique par Argo CD qui ramène le déploiement à 3. |
+| TP4-7  | l'historique des commits de `tasks-config` avec le `revert`, et le retour à 2 pods.                | Retour arrière GitOps via `git revert HEAD` dans `tasks-config` et retour automatique de l'application à 2 pods dans Argo CD.                     |
+| TP4-8  | le run complet avec tous les jobs au vert, `update-config` compris.                                | Exécution complète du workflow `docker.yml` sur le tag `v0.2.0` avec les 5 jobs au vert (`test`, `build`, `deploy-staging`, `deploy-production`, `update-config`). |
+| TP4-9  | le commit automatique dans `tasks-config` et Argo CD synchronisé sur `0.2.0`.                      | Commit automatique `chore: deploy tasks-api 0.2.0` poussé par `github-actions[bot]` dans `tasks-config` et synchronisation d'Argo CD sur `0.2.0`. |
+| TP4-10 | `/version` qui répond `0.2.0`.                                                                     | Vérification finale sur l'endpoint `/version` du cluster qui répond désormais `{"version":"0.2.0"}`.                                              |
 
 Questions à traiter :
 
@@ -178,7 +185,10 @@ Questions à traiter :
    <br>En résumé : le pipeline CI **pousse (push)** l'image vers GHCR et le commit vers Git, tandis qu'Argo CD **tire (pull)** la configuration depuis Git vers le cluster. Contrairement à un déploiement CI/CD « classique » (push-based) où le runner GitHub Actions exécuterait `kubectl apply` et devrait posséder les identifiants administrateur du cluster Kubernetes, en GitOps le cluster n'est pas exposé à l'extérieur et se synchronise lui-même depuis Git.</i>
 
 **Difficultés rencontrées :**
-<br><i>Sur macOS, l'outil `kind` n'était pas préinstallé et Docker Desktop devait être démarré avant de pouvoir créer le cluster `gitops`. Il a aussi fallu créer un Fine-grained Personal Access Token avec la permission `Contents: Read and write` sur `tasks-config` pour permettre au job `update-config` de pousser le changement de version.</i>
+<br><i>1. **Installation de `kind` et Docker Desktop sur macOS :** la commande `kind create cluster` échouait initialement car `kind` devait être installé via Homebrew (`brew install kind`) et Docker Desktop devait être démarré au préalable.
+<br>2. **Architecture d'image (`amd64` vs `arm64` sur Mac Apple Silicon) :** les pods restaient d'abord en `ImagePullBackOff` (`no match for platform in manifest`) car le runner GitHub Actions construit par défaut en `linux/amd64` alors que le nœud `kind` sur Mac M-series tourne en `linux/arm64`. Nous avons résolu cela en chargeant l'image construite pour `arm64` dans `kind` (`kind load docker-image`).
+<br>3. **Rapidité du `selfHeal` :** lors du `kubectl scale --replicas=5`, Argo CD corrigeait l'écart en moins d'une seconde, rendant les 5 pods difficiles à observer sans suivre les événements ou suspendre brièvement `selfHeal`.
+<br>4. **Jeton `CONFIG_REPO_TOKEN` :** le job `update-config` a d'abord renvoyé `Input required and not supplied: token` tant que le Fine-grained PAT (avec accès `Contents: Read and write` sur `tasks-config`) n'était pas renseigné dans les *Repository secrets* de `tasks-api`.</i>
 
 ## Bilan
 
